@@ -543,7 +543,7 @@ async function runQuery() {
 
 function addLayer() {
   selectedLayerId = null;
-  runQuery();
+  renderLayerList();
 }
 
 function addLayerFromData(sqlText, geojson) {
