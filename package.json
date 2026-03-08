@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:vendor": "esbuild static/vendor/codemirror-entry.js --bundle --format=esm --outfile=static/vendor/codemirror-bundle.js"
+  },
+  "dependencies": {
+    "@codemirror/lang-sql": "^6",
+    "@codemirror/theme-one-dark": "^6",
+    "codemirror": "^6",
+    "@replit/codemirror-vim": "^6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25"
+  }
+}

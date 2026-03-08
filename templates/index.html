@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PostGIS Studio</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header>
+        <h1>PostGIS Studio</h1>
+        <button id="collapse-toggle" title="Toggle sidebar">◧</button>
+      </header>
+
+      <div id="toolbar">
+        <button id="btn-run" title="Run query (Ctrl+Enter)">Run</button>
+        <button id="btn-add-layer">Add Layer</button>
+        <button id="btn-draw" title="Draw polygon on map">Draw</button>
+      </div>
+
+      <div id="editor-container"></div>
+
+      <div id="error-display" hidden></div>
+
+      <div id="layer-section">
+        <h2>Layers</h2>
+        <ul id="layer-list"></ul>
+      </div>
+
+      <footer id="status-bar">
+        <span id="status-text">Ready</span>
+        <span id="session-actions">
+          <a href="#" id="btn-save-session">save session</a>
+          <label id="btn-load-session">load session<input type="file" id="session-file-input" accept=".json" hidden></label>
+          <a href="#" id="btn-export-gpkg">export gpkg</a>
+        </span>
+      </footer>
+    </aside>
+
+    <div id="map"></div>
+  </div>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
