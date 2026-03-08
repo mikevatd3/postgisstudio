@@ -532,6 +532,8 @@ async function runQuery() {
       } else {
         addLayerFromData(sqlText, data);
       }
+    } else if (!data.has_geometry && data.row_count > 0) {
+      setStatus(`${data.row_count} row${data.row_count !== 1 ? "s" : ""} returned (no geometry column)`);
     }
   } catch (err) {
     showError(err.message);
