@@ -43,6 +43,20 @@ def _json_safe(val):
     return val
 
 
+async def get_schema() -> dict:
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT table_schema || '.' || table_name AS tbl, column_name
+            FROM information_schema.columns
+            WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY tbl, ordinal_position
+        """)
+        schema = {}
+        for row in rows:
+            schema.setdefault(row["tbl"], []).append(row["column_name"])
+        return schema
+
+
 async def run_query(sql: str) -> dict:
     async with _pool.acquire() as conn:
         stmt = await conn.prepare(sql)

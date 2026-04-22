@@ -1,4 +1,8 @@
-import { EditorView, basicSetup, sql, PostgreSQL, oneDark, keymap, vim, Prec } from "./vendor/codemirror-bundle.js";
+import { EditorView, basicSetup, PostgreSQL, schemaCompletionSource, LanguageSupport, oneDark, keymap, vim, Prec, Compartment } from "./vendor/codemirror-bundle.js";
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/static/sw.js");
+}
 
 // --- Constants ---
 const COLORS = ['#a7c080', '#83c092', '#7fbbb3', '#dbbc7f', '#d699b6', '#e69875'];
@@ -24,6 +28,8 @@ const runKeymap = keymap.of([{
   run: () => { runQuery(); return true; },
 }]);
 
+const schemaConf = new Compartment();
+
 const editor = new EditorView({
   parent: document.getElementById("editor-container"),
   doc: "SELECT * FROM ",
@@ -31,9 +37,20 @@ const editor = new EditorView({
     vim(),
     Prec.high(runKeymap),
     basicSetup,
-    sql({ dialect: PostgreSQL }),
+    new LanguageSupport(PostgreSQL.language),
+    schemaConf.of([]),
     oneDark,
   ],
+});
+
+fetch("/api/schema").then(r => r.json()).then(schema => {
+  editor.dispatch({
+    effects: schemaConf.reconfigure(
+      PostgreSQL.language.data.of({
+        autocomplete: schemaCompletionSource({ dialect: PostgreSQL, schema, defaultSchema: "public" })
+      })
+    )
+  });
 });
 
 // Prevent Escape from blurring the editor. Must be a non-capture listener
@@ -271,36 +288,55 @@ sessionFileInput.addEventListener("change", (e) => {
   sessionFileInput.value = "";
 });
 
-// Drag and drop
+// Drag and drop — capture phase so we intercept before CodeMirror/Leaflet
 let dropOverlay = null;
+function isFileDrag(e) { return e.dataTransfer && e.dataTransfer.types.includes("Files"); }
 document.addEventListener("dragenter", (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
-  if (draggedLayerId) return;
   if (!dropOverlay) {
     dropOverlay = document.createElement("div");
     dropOverlay.id = "drop-overlay";
-    dropOverlay.innerHTML = "<span>Drop .json file</span>";
+    dropOverlay.innerHTML = "<span>Drop .json / .geojson file</span>";
     document.body.appendChild(dropOverlay);
   }
-});
-document.addEventListener("dragover", (e) => e.preventDefault());
+}, { capture: true });
+document.addEventListener("dragover", (e) => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+}, { capture: true });
 document.addEventListener("dragleave", (e) => {
+  if (!isFileDrag(e)) return;
   if (e.relatedTarget === null && dropOverlay) {
     dropOverlay.remove();
     dropOverlay = null;
   }
-});
+}, { capture: true });
 document.addEventListener("drop", (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
+  e.stopPropagation();
   if (dropOverlay) {
     dropOverlay.remove();
     dropOverlay = null;
   }
   const file = e.dataTransfer.files[0];
-  if (file && file.name.endsWith(".json")) {
-    loadSession(file);
-  }
-});
+  if (!file) return;
+  const isJson = file.name.endsWith(".json");
+  const isGeoJson = file.name.endsWith(".geojson");
+  if (!isJson && !isGeoJson) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    let data;
+    try { data = JSON.parse(ev.target.result); } catch { return; }
+    if (isGeoJson || data.type === "FeatureCollection" || data.type === "Feature") {
+      addLayerFromFile(file.name, data);
+    } else {
+      loadSession(data);
+    }
+  };
+  reader.readAsText(file);
+}, { capture: true });
 
 // --- Layer drag-and-drop reordering ---
 let draggedLayerId = null;
@@ -388,6 +424,32 @@ function setStatus(msg) {
   statusBar.textContent = msg;
 }
 
+function promptFilename(defaultValue, selectEnd, onConfirm) {
+  const overlay = document.createElement("div");
+  overlay.id = "filename-overlay";
+  const box = document.createElement("div");
+  box.id = "filename-box";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = defaultValue;
+  const confirm = () => {
+    const val = input.value.trim();
+    if (val) onConfirm(val);
+    overlay.remove();
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") confirm();
+    if (e.key === "Escape") overlay.remove();
+    e.stopPropagation();
+  });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  box.appendChild(input);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  input.focus();
+  input.setSelectionRange(0, selectEnd);
+}
+
 function nextColor() {
   const c = COLORS[colorIndex % COLORS.length];
   colorIndex++;
@@ -453,9 +515,12 @@ function selectLayer(id) {
   const layer = layers.find(l => l.id === id);
   if (!layer) return;
   selectedLayerId = id;
+  const isFile = layer.source === "file";
   editor.dispatch({
-    changes: { from: 0, to: editor.state.doc.length, insert: layer.sql },
+    changes: { from: 0, to: editor.state.doc.length, insert: isFile ? "" : layer.sql },
   });
+  document.getElementById("editor-container").classList.toggle("file-layer", isFile);
+  btnRun.disabled = isFile;
   renderLayerList();
 }
 
@@ -488,7 +553,7 @@ function makeLeafletLayer(geojsonData, layerObj) {
 }
 
 function updateLayerData(layerObj, sqlText, geojson) {
-  map.removeLayer(layerObj.leafletLayer);
+  if (layerObj.leafletLayer) map.removeLayer(layerObj.leafletLayer);
   layerObj.sql = sqlText;
   layerObj.geojsonData = { type: "FeatureCollection", features: geojson.features };
   computeSymbology(layerObj);
@@ -502,6 +567,8 @@ function updateLayerData(layerObj, sqlText, geojson) {
 }
 
 async function runQuery() {
+  const active = selectedLayerId && layers.find(l => l.id === selectedLayerId);
+  if (active?.source === "file") return;
   const sqlText = getSQL();
   if (!sqlText) return;
 
@@ -544,7 +611,23 @@ async function runQuery() {
 }
 
 function addLayer() {
-  selectedLayerId = null;
+  layerCounter++;
+  const color = nextColor();
+  const id = `layer-${layerCounter}`;
+  const name = `Layer ${layerCounter}`;
+
+  const layerObj = {
+    id, name, sql: "", source: "query", color, visible: true,
+    leafletLayer: null, geojsonData: null,
+    symbologyColumn: null, symbologyMeta: null,
+  };
+  layers.push(layerObj);
+  selectedLayerId = id;
+  document.getElementById("editor-container").classList.remove("file-layer");
+  btnRun.disabled = false;
+  editor.dispatch({
+    changes: { from: 0, to: editor.state.doc.length, insert: "" },
+  });
   renderLayerList();
 }
 
@@ -556,7 +639,7 @@ function addLayerFromData(sqlText, geojson) {
   const geojsonData = { type: "FeatureCollection", features: geojson.features };
 
   const layerObj = {
-    id, name, sql: sqlText, color, visible: true,
+    id, name, sql: sqlText, source: "query", color, visible: true,
     leafletLayer: null, geojsonData,
     symbologyColumn: null, symbologyMeta: null,
   };
@@ -572,6 +655,35 @@ function addLayerFromData(sqlText, geojson) {
   if (bounds.isValid()) {
     map.fitBounds(bounds, { padding: [30, 30] });
   }
+  syncLayerZOrder();
+}
+
+function addLayerFromFile(filename, geojson) {
+  layerCounter++;
+  const color = nextColor();
+  const id = `layer-${layerCounter}`;
+  const name = filename.replace(/\.(geo)?json$/i, "");
+  const features = geojson.type === "FeatureCollection" ? geojson.features : [geojson];
+  const geojsonData = { type: "FeatureCollection", features };
+
+  const layerObj = {
+    id, name, sql: "", source: "file", color, visible: true,
+    leafletLayer: null, geojsonData,
+    symbologyColumn: null, symbologyMeta: null,
+  };
+  computeSymbology(layerObj);
+  const leafletLayer = makeLeafletLayer(geojsonData, layerObj).addTo(map);
+  layerObj.leafletLayer = leafletLayer;
+  layers.push(layerObj);
+  selectedLayerId = id;
+  document.getElementById("editor-container").classList.add("file-layer");
+  btnRun.disabled = true;
+  editor.dispatch({
+    changes: { from: 0, to: editor.state.doc.length, insert: "" },
+  });
+  renderLayerList();
+  const bounds = leafletLayer.getBounds();
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
   syncLayerZOrder();
 }
 
@@ -700,15 +812,18 @@ function renderLayerList() {
     save.title = "Save GeoJSON";
     save.addEventListener("click", (e) => {
       e.stopPropagation();
-      const filename = prompt("Save as:", "export.geojson");
-      if (!filename) return;
-      const blob = new Blob([JSON.stringify(layer.geojsonData, null, 2)], { type: "application/geo+json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename.endsWith(".geojson") ? filename : filename + ".geojson";
-      a.click();
-      URL.revokeObjectURL(url);
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const snake = layer.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      const stem = `${snake}_${today}`;
+      promptFilename(stem + ".geojson", stem.length, (filename) => {
+        const blob = new Blob([JSON.stringify(layer.geojsonData, null, 2)], { type: "application/geo+json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename.endsWith(".geojson") ? filename : filename + ".geojson";
+        a.click();
+        URL.revokeObjectURL(url);
+      });
     });
 
     const remove = document.createElement("span");

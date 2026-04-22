@@ -33,6 +33,12 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
+@app.get("/api/schema")
+async def schema():
+    result = await db.get_schema()
+    return JSONResponse(result)
+
+
 class QueryRequest(BaseModel):
     sql: str
 

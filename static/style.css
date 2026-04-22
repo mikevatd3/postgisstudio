@@ -153,6 +153,7 @@ body {
   min-height: 120px;
   overflow: auto;
   border-bottom: 1px solid var(--bg3);
+  position: relative;
 }
 
 #editor-container .cm-editor {
@@ -192,6 +193,11 @@ body {
 
 #editor-container .cm-cursor {
   border-left-color: var(--fg);
+}
+
+#editor-container.file-layer {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 /* Error display */
@@ -463,6 +469,32 @@ body {
 }
 
 /* Drop zone overlay */
+#filename-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(43, 51, 57, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+#filename-box input {
+  background: var(--bg1);
+  color: var(--fg);
+  border: 1px solid var(--bg3);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+  font-size: 13px;
+  width: 360px;
+  outline: none;
+}
+
+#filename-box input:focus {
+  border-color: var(--blue);
+}
+
 #drop-overlay {
   position: fixed;
   inset: 0;

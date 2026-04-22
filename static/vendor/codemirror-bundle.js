@@ -32819,12 +32819,15 @@ function getCM(view) {
   return view.cm || null;
 }
 export {
+  Compartment,
   EditorView,
+  LanguageSupport,
   PostgreSQL,
   Prec,
   basicSetup,
   keymap,
   oneDark,
+  schemaCompletionSource,
   sql,
   vim
 };
